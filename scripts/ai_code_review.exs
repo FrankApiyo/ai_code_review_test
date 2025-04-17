@@ -589,13 +589,16 @@ defmodule AICodeReview do
       body: comment_body,
       commit_id: commit_id,
       path: file_path,
-      # The line in the diff (in the new file) where the comment should appear
+      start_line: line_number,
       line: line_number,
-      # Comments on added lines belong to the "RIGHT" side of the diff
+      start_side: "RIGHT",
       side: "RIGHT"
     }
 
-    # IO.inspect(request_payload, label: "GitHub Comment Payload") # Debug payload
+    dbg(request_payload)
+
+    # Debug payload
+    IO.inspect(request_payload, label: "GitHub Comment Payload")
 
     try do
       response =
