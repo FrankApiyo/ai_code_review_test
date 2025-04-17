@@ -18,7 +18,12 @@ jobs:
           otp-version: '26.1'
 
       - name: Run AI Code Review
-        run: mix run scripts/ai_code_review.exs
+        run: |
+          mkdir temp_runner
+          cp scripts/ai_code_review.exs temp_runner/
+          cp -r .ai-code-rules temp_runner/
+          cd temp_runner
+          elixir ai_code_review.exs
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
