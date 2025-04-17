@@ -589,9 +589,7 @@ defmodule AICodeReview do
       body: comment_body,
       commit_id: commit_id,
       path: file_path,
-      start_line: line_number,
       line: line_number,
-      start_side: "RIGHT",
       side: "RIGHT"
     }
 
