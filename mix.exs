@@ -1,4 +1,4 @@
-defmodule AiCodeReviewTest.MixProject do
+defmodule AiCodeReviewTest.MixProject do # test
   use Mix.Project
 
   def project do
