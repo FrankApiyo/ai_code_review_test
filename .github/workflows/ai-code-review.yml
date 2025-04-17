@@ -22,6 +22,7 @@ jobs:
           echo "Ref Name (github.ref_name): ${{ github.ref_name }}"
           echo "Head Ref (github.head_ref): ${{ github.head_ref }}"
           echo "Base Ref (github.base_ref): ${{ github.base_ref }}"
+          echo "PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}"
           echo "Repository: ${{ github.repository }}"
 
       - name: Set up Elixir
@@ -42,3 +43,4 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GITHUB_REPOSITORY: ${{ github.repository }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}

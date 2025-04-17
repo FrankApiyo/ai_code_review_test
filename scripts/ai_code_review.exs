@@ -138,6 +138,7 @@ end
 defmodule AICodeReview do
   # e.g., "owner/repo"
   @repo System.fetch_env!("GITHUB_REPOSITORY")
+  @head_sha System.fetch_env!("PR_HEAD_SHA")
   # Branch being merged
   @pr_branch System.fetch_env!("GITHUB_HEAD_REF")
   # Branch being merged into
@@ -252,9 +253,8 @@ defmodule AICodeReview do
 
         # Fetch PR number and HEAD commit SHA *before* processing chunks
         pr_number = get_pr_number()
-        head_commit_sha = get_head_commit_sha()
         IO.puts("PR Number: #{pr_number}")
-        IO.puts("HEAD Commit SHA: #{head_commit_sha}")
+        IO.puts("HEAD Commit SHA: #{@head_sha}")
 
         Enum.each(all_violations, fn violation ->
           # Validate required fields before posting
@@ -265,7 +265,7 @@ defmodule AICodeReview do
 
             post_suggestion_comment(
               pr_number,
-              head_commit_sha,
+              @head_sha,
               violation["file"],
               violation["line"],
               violation["message"],
@@ -333,16 +333,6 @@ defmodule AICodeReview do
 
       {output_or_error, code} ->
         raise "Failed to get PR diff between #{target_ref} and HEAD (exit #{code}): #{output_or_error}"
-    end
-  end
-
-  defp get_head_commit_sha do
-    case System.cmd("git", ["rev-parse", "HEAD"], stderr_to_stdout: true) do
-      {sha, 0} ->
-        String.trim(sha)
-
-      {error_out, code} ->
-        raise "Failed to get HEAD commit SHA (exit #{code}): #{error_out}"
     end
   end
 
@@ -553,11 +543,21 @@ defmodule AICodeReview do
     rule_link_path = Path.join([@rules_dir, rule_file])
     # Link to rule in commit
     rule_link =
-      "[View Rule](#{repo_url_base}/blob/#{get_head_commit_sha()}/#{@rules_dir}/#{rule_file})"
+      "[View Rule](#{repo_url_base}/blob/#{@head_sha}/#{@rules_dir}/#{rule_file})"
 
     """
+    🤖 **AI Code Review Suggestion**
+
+    **Issue:**
+    > #{message}
+
+    **Suggestion:**
     ```suggestion
+    #{suggestion}
     ```
+
+    ---
+    *Rule: #{rule_file} (#{rule_link})*
     """
   end
 
@@ -576,17 +576,17 @@ defmodule AICodeReview do
     comment_body = build_suggestion_body(message, suggestion, rule_file)
 
     request_payload = %{
-      line: line_number,
       body: comment_body,
       commit_id: commit_id,
       path: file_path,
-      start_line: line_number,
-      start_side: "RIGHT",
+      line: line_number,
       side: "RIGHT"
     }
 
     dbg(request_payload)
-    dbg(url)
+
+    # Debug payload
+    IO.inspect(request_payload, label: "GitHub Comment Payload")
 
     try do
       response =
@@ -601,6 +601,8 @@ defmodule AICodeReview do
           # 1 minute
           receive_timeout: 120_000
         )
+
+      dbg(response)
 
       IO.puts(
         "Successfully posted comment to #{file_path}:#{line_number}. Status: #{response.status}"
