@@ -4,6 +4,103 @@ Mix.install([
   {:earmark, "~> 1.4"}
 ])
 
+defmodule DiffParser do
+  def parse(diff_text) do
+    # Keep empty lines if they exist
+    lines = String.split(diff_text, "\n", trim: false)
+    # Initialize state with nil line context
+    initial_state = %{current_file: nil, current_line: nil, lines_in_hunk: nil, results: []}
+
+    parse_lines(lines, initial_state)
+    |> Map.get(:results)
+    |> Enum.reverse()
+  end
+
+  # Base case
+  defp parse_lines([], state), do: state
+
+  # File header: Set current file, reset line context to nil
+  defp parse_lines(["diff --git a/" <> rest | tail], state) do
+    # Safer extraction of the 'b' file path
+    new_file =
+      case String.split(rest, " b/", parts: 2) do
+        # Handle potential tabs/spaces
+        [_, file_b_part] ->
+          String.split(file_b_part, "\t", parts: 2) |> List.first() |> String.trim()
+
+        # Or handle error if format is unexpected
+        _ ->
+          nil
+      end
+
+    # Reset line context for the new file
+    parse_lines(tail, %{state | current_file: new_file, current_line: nil, lines_in_hunk: nil})
+  end
+
+  # Hunk header: Set starting line number and reset hunk counter
+  defp parse_lines(["@@ -" <> hunk_info | tail], state) do
+    # Ensure we have a current file before processing hunks
+    if is_nil(state.current_file) do
+      # Skip line if file context is missing (shouldn't happen in valid diff)
+      parse_lines(tail, state)
+    else
+      try do
+        # Extract the part after '+' e.g., "1,7 @@" or "1 @@"
+        new_part = String.split(hunk_info, "+", parts: 2) |> Enum.at(1) |> String.trim()
+        # Extract the starting line number before the comma or space
+        new_start_str = String.split(new_part, [",", " "], parts: 2) |> List.first()
+        new_start_line = String.to_integer(new_start_str)
+        # Successfully parsed integer, we are now inside a hunk
+        parse_lines(tail, %{state | current_line: new_start_line, lines_in_hunk: 0})
+      rescue
+        # Handle potential errors during parsing (e.g., invalid format, non-integer)
+        # Skip malformed hunk header
+        _error -> parse_lines(tail, state)
+      end
+    end
+  end
+
+  # Added line: Process ONLY if current_line is an integer (i.e., inside a valid hunk)
+  defp parse_lines(["+" <> code | tail], %{current_line: line_num} = state)
+       when is_integer(line_num) do
+    # Ensure current_file is also set
+    if is_nil(state.current_file) do
+      # Skip if no file context
+      parse_lines(tail, state)
+    else
+      new_result = %{file: state.current_file, line: line_num + state.lines_in_hunk, code: code}
+
+      new_state = %{
+        state
+        | results: [new_result | state.results],
+          # Increment line count *within the hunk* for the *next* line
+          lines_in_hunk: state.lines_in_hunk + 1
+      }
+
+      parse_lines(tail, new_state)
+    end
+  end
+
+  # Context line: Process ONLY if current_line is an integer
+  defp parse_lines([" " <> _code | tail], %{current_line: line_num} = state)
+       when is_integer(line_num) do
+    # Ensure current_file is also set
+    if is_nil(state.current_file) do
+      # Skip if no file context
+      parse_lines(tail, state)
+    else
+      # Only increment the line count within the hunk
+      new_state = %{state | lines_in_hunk: state.lines_in_hunk + 1}
+      parse_lines(tail, new_state)
+    end
+  end
+
+  # Skip all other lines (including '+', ' ' when current_line is nil, '-', index, etc.)
+  defp parse_lines([_other | tail], state) do
+    parse_lines(tail, state)
+  end
+end
+
 defmodule AICodeReview do
   @repo System.fetch_env!("GITHUB_REPOSITORY")
   @pr_branch System.fetch_env!("GITHUB_HEAD_REF")
@@ -15,30 +112,33 @@ defmodule AICodeReview do
     dry_run? = Enum.member?(System.argv(), "--dry-run")
     rules = load_rules(".ai-code-rules")
     diff = get_pr_diff()
-    IO.puts(diff)
-    unchanged_and_added_lines = extract_changed_code(diff)
-    IO.puts(unchanged_and_added_lines)
+    added_lines_with_context = DiffParser.parse(diff)
+    chunks = chunk_lines(added_lines_with_context)
 
-    unchanged_and_added_lines
-    # |> chunk_lines()
+    dbg(Enum.count(chunks))
 
-    # |> Enum.each(fn chunk -u
-    #   prompt = build_prompt(chunk, rules)
-    #   response = analyze_with_ai(prompt)
+    Enum.with_index(chunks)
+    |> Enum.each(fn {chunk, index} ->
+      if Enum.empty?(chunk) do
+        IO.puts("--- Chunk #{index + 1}: SKIPPED (Empty Chunk) ---")
+      else
+        # Build the prompt for the current chunk
+        prompt = build_prompt(chunk, rules)
+        IO.puts(prompt)
 
-    #   Enum.zip(chunk, response)
-    #   |> Enum.each(fn {{line, code}, result} ->
-    #     if result["violation"] do
-    #       if dry_run? do
-    #         IO.puts(
-    #           "\n---\nDRY RUN: Would comment on line #{line}:\n#{code}\n#{inspect(result)}\n"
-    #         )
-    #       else
-    #         post_comment(line, code, result)
-    #       end
-    #     end
-    #   end)
-    # end)
+        # Print the generated prompt clearly
+        IO.puts("\n--- Prompt for Chunk #{index + 1} ---")
+        # if !dry_run? do
+        #   IO.puts("===> Would send Chunk #{index + 1} to AI...")
+        #   # response = analyze_with_ai(prompt)
+        #   # IO.inspect(response, label: "AI Response for Chunk #{index + 1}")
+        #   # ... process response and post comments ...
+        # else
+        #   IO.puts("===> DRY RUN: Would send Chunk #{index + 1} to AI...")
+        # end
+        # ======================================================
+      end
+    end)
   end
 
   defp load_rules(dir) do
@@ -89,17 +189,21 @@ defmodule AICodeReview do
     |> Enum.join("\n")
   end
 
-  defp chunk_lines(lines, max_chars \\ 12_000) do
-    Enum.reduce(lines, {[], [], 0}, fn {line, code}, {chunks, current_chunk, char_count} ->
+  defp chunk_lines(lines_with_context, max_chars \\ 12_000) do
+    Enum.reduce(lines_with_context, {[], [], 0}, fn %{code: code} = line_data,
+                                                    {chunks, current_chunk, char_count} ->
       code_size = String.length(code)
 
-      if char_count + code_size > max_chars do
-        {[Enum.reverse(current_chunk) | chunks], [{line, code}], code_size}
+      # Ensure chunk isn't empty
+      if char_count + code_size > max_chars and char_count > 0 do
+        {[Enum.reverse(current_chunk) | chunks], [line_data], code_size}
       else
-        {chunks, [{line, code} | current_chunk], char_count + code_size}
+        {chunks, [line_data | current_chunk], char_count + code_size}
       end
     end)
     |> then(fn {chunks, last_chunk, _} -> Enum.reverse([Enum.reverse(last_chunk) | chunks]) end)
+    # Filter out potentially empty chunks if the reduce logic allows it
+    |> Enum.reject(&Enum.empty?/1)
   end
 
   defp build_prompt(chunk, rules) do
@@ -110,23 +214,47 @@ defmodule AICodeReview do
 
     code_snippets =
       chunk
-      |> Enum.map(fn {_line, code} -> "```elixir\n#{code}\n```" end)
-      |> Enum.join("\n\n")
+      |> Enum.map(fn %{file: file, line: line, code: code} ->
+        """
+        File: #{file}
+        Line: #{line}
+        ```elixir
+        #{code}
+        ```
+        """
+      end)
+      # Separator between snippets
+      |> Enum.join("\n\n---\n\n")
 
     """
-    Given the following Elixir code snippets, determine if any of them violate the provided anti-patterns.
-
-    Respond in JSON list format:
-    [
-      { "violation": true/false, "rule_file": "file.md", "message": "...", "suggestion": "..." },
-      ...
-    ]
-
-    Code:
-    #{code_snippets}
+    Analyze the following Elixir code snippets based on the provided rules.
+    Each snippet includes its original file path and line number.
 
     Rules:
     #{rules_text}
+
+    ---
+
+    Code Snippets to Analyze:
+    #{code_snippets}
+
+    ---
+
+    Respond ONLY with a valid JSON list. Each object in the list MUST correspond to a snippet where a rule violation is found.
+    Each object MUST include the ORIGINAL "file" and "line" number provided for that snippet, along with "violation" (which must be true), "rule_file", "message", and "suggestion".
+    If no violations are found for any snippet, respond with an empty JSON list: [].
+
+    Example of a valid response object:
+    {
+      "file": "path/to/original/file.ex",
+      "line": 15,
+      "violation": true,
+      "rule_file": "comments-overuse.md",
+      "message": "This comment explains self-evident code.",
+      "suggestion": "Consider removing the comment or renaming variables for clarity."
+    }
+
+    JSON Response:
     """
   end
 
@@ -153,7 +281,7 @@ defmodule AICodeReview do
     |> Jason.decode!()
   end
 
-  defp post_comment(_line_number, _code, %{
+  defp post_comment(line_number, _code, %{
          "message" => msg,
          "suggestion" => suggestion,
          "rule_file" => file
@@ -173,7 +301,7 @@ defmodule AICodeReview do
     📘 [View Rule](https://github.com/#{@repo}/blob/main/.ai-code-rules/#{file})
     """
 
-    Req.post!("https://api.github.com/repos/#{@repo}/issues/#{pr_number}/comments",
+    Req.post!("https://api.github.com/repos/#{@repo}/pulls/#{pr_number}/comments",
       headers: [
         {"Authorization", "Bearer #{@github_token}"},
         {"Content-Type", "application/json"}
