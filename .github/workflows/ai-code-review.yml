@@ -16,7 +16,6 @@ jobs:
         with:
           fetch-depth: 0
 
-      # It can be helpful to print specific context variables for debugging
       - name: Print PR context
         run: |
           echo "Ref Name (github.ref_name): ${{ github.ref_name }}"
