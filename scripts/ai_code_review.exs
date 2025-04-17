@@ -477,7 +477,7 @@ defmodule AICodeReview do
          - "message": A concise explanation of WHY the code violates the specific rule.
          - "suggestion": A code change suggestion for the developer to fix the violation. This should be the code the developer can apply. If the suggestion is to remove the line, provide an empty string ""
          - the suggestion should be the code that can be used to replace the line (code that should be in place of what is currently on the line)
-      - look at each line carefully please and don't have a line replaced with "" when it could have been edited a different way. you are a proffesional reviewer
+      - look at each line carefully please and don't have a line replaced with "" when it could have been edited a different way. you are a pro. reviewer
                         
                         
     4. If a snippet violates multiple rules, create a SEPARATE JSON object for EACH violation.
@@ -501,7 +501,7 @@ defmodule AICodeReview do
     do: System.get_env("GEMINI_API_KEY") || raise("GEMINI_API_KEY environment variable not set")
 
   # Using Flash for potential speed/cost benefit
-  def review_code_with_gemini(prompt, model \\ "gemini-1.5-flash-latest") do
+  def review_code_with_gemini(prompt, model \\ "gemini-2.0-flash") do
     api_key = get_gemini_key()
     url = "#{@gemini_endpoint}/#{model}:generateContent?key=#{api_key}"
 
