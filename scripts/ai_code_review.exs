@@ -7,22 +7,38 @@ Mix.install([
 defmodule AICodeReview do
   @repo System.fetch_env!("GITHUB_REPOSITORY")
   @pr_branch System.fetch_env!("GITHUB_HEAD_REF")
+  @base_ref System.fetch_env!("GITHUB_BASE_REF")
   @github_token System.fetch_env!("GITHUB_TOKEN")
   @openai_key System.fetch_env!("OPENAI_API_KEY")
 
   def run do
+    dry_run? = Enum.member?(System.argv(), "--dry-run")
     rules = load_rules(".ai-code-rules")
     diff = get_pr_diff()
-    green_lines = extract_green_lines(diff)
+    IO.puts(diff)
+    unchanged_and_added_lines = extract_changed_code(diff)
+    IO.puts(unchanged_and_added_lines)
 
-    green_lines
-    |> Enum.each(fn {line, code} ->
-      response = analyze_with_ai(code, rules)
+    unchanged_and_added_lines
+    # |> chunk_lines()
 
-      if response["violation"] do
-        post_comment(line, code, response)
-      end
-    end)
+    # |> Enum.each(fn chunk -u
+    #   prompt = build_prompt(chunk, rules)
+    #   response = analyze_with_ai(prompt)
+
+    #   Enum.zip(chunk, response)
+    #   |> Enum.each(fn {{line, code}, result} ->
+    #     if result["violation"] do
+    #       if dry_run? do
+    #         IO.puts(
+    #           "\n---\nDRY RUN: Would comment on line #{line}:\n#{code}\n#{inspect(result)}\n"
+    #         )
+    #       else
+    #         post_comment(line, code, result)
+    #       end
+    #     end
+    #   end)
+    # end)
   end
 
   defp load_rules(dir) do
@@ -37,12 +53,14 @@ defmodule AICodeReview do
   end
 
   defp get_pr_diff do
-    case System.cmd("gh", ["pr", "diff", @pr_branch, "--color=never"], stderr_to_stdout: true) do
+    target_ref = "origin/#{@base_ref}"
+
+    case System.cmd("git", ["diff", target_ref, "--unified=0"], stderr_to_stdout: true) do
       {out, 0} ->
         out
 
       {output_or_error, code} ->
-        raise "Failed to get PR diff (exit #{code}): #{output_or_error}"
+        raise "Failed to get PR diff against #{target_ref} (exit #{code}): #{output_or_error}"
     end
   end
 
@@ -63,42 +81,63 @@ defmodule AICodeReview do
     end
   end
 
-  defp extract_green_lines(diff) do
+  defp extract_changed_code(diff) do
     diff
     |> String.split("\n")
-    |> Enum.filter(&(String.starts_with?(&1, "+") and not String.starts_with?(&1, "+++")))
+    |> Enum.reject(&String.starts_with?(&1, "-"))
     |> Enum.map(&String.trim_leading(&1, "+"))
-    |> Enum.with_index(1)
+    |> Enum.join("\n")
   end
 
-  defp analyze_with_ai(code, rules) do
-    dbg(code)
-    dbg(rules)
+  defp chunk_lines(lines, max_chars \\ 12_000) do
+    Enum.reduce(lines, {[], [], 0}, fn {line, code}, {chunks, current_chunk, char_count} ->
+      code_size = String.length(code)
 
+      if char_count + code_size > max_chars do
+        {[Enum.reverse(current_chunk) | chunks], [{line, code}], code_size}
+      else
+        {chunks, [{line, code} | current_chunk], char_count + code_size}
+      end
+    end)
+    |> then(fn {chunks, last_chunk, _} -> Enum.reverse([Enum.reverse(last_chunk) | chunks]) end)
+  end
+
+  defp build_prompt(chunk, rules) do
     rules_text =
       rules
       |> Enum.map(fn %{file: file, ast: ast} -> "- #{file}:\n#{flatten_md(ast)}" end)
       |> Enum.join("\n")
 
-    prompt = """
-    Given the Elixir code snippet below, determine if it violates any of these anti-patterns.
+    code_snippets =
+      chunk
+      |> Enum.map(fn {_line, code} -> "```elixir\n#{code}\n```" end)
+      |> Enum.join("\n\n")
+
+    """
+    Given the following Elixir code snippets, determine if any of them violate the provided anti-patterns.
+
+    Respond in JSON list format:
+    [
+      { "violation": true/false, "rule_file": "file.md", "message": "...", "suggestion": "..." },
+      ...
+    ]
 
     Code:
-    #{code}
+    #{code_snippets}
 
     Rules:
     #{rules_text}
-
-    Respond with JSON: { "violation": true/false, "rule_file": "file.md", "message": "...", "suggestion": "..." }
     """
+  end
 
+  defp analyze_with_ai(prompt) do
     Req.post!("https://api.openai.com/v1/chat/completions",
       headers: [
         {"Authorization", "Bearer #{@openai_key}"},
         {"Content-Type", "application/json"}
       ],
       json: %{
-        model: "gpt-4",
+        model: "gpt-4o",
         messages: [
           %{role: "system", content: "You are an Elixir code reviewer."},
           %{role: "user", content: prompt}
@@ -106,7 +145,6 @@ defmodule AICodeReview do
         temperature: 0.2
       }
     )
-    |> dbg()
     |> Map.get(:body)
     |> Map.get("choices")
     |> List.first()
