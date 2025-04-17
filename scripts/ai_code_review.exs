@@ -149,7 +149,6 @@ defmodule AICodeReview do
   # --- Constants ---
   @gemini_endpoint "https://generativelanguage.googleapis.com/v1beta/models"
   @github_api "https://api.github.com"
-  # Directory for rule markdown files
   @rules_dir ".ai-code-rules"
 
   def run do
