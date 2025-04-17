@@ -556,18 +556,8 @@ defmodule AICodeReview do
       "[View Rule](#{repo_url_base}/blob/#{get_head_commit_sha()}/#{@rules_dir}/#{rule_file})"
 
     """
-    🤖 **AI Code Review Suggestion**
-
-    **Issue:**
-    > #{message}
-
-    **Suggestion:**
     ```suggestion
-    #{suggestion}
     ```
-
-    ---
-    *Rule: #{rule_file} (#{rule_link})*
     """
   end
 
@@ -586,17 +576,17 @@ defmodule AICodeReview do
     comment_body = build_suggestion_body(message, suggestion, rule_file)
 
     request_payload = %{
+      line: line_number,
       body: comment_body,
       commit_id: commit_id,
       path: file_path,
-      line: line_number,
+      start_line: line_number,
+      start_side: "RIGHT",
       side: "RIGHT"
     }
 
     dbg(request_payload)
-
-    # Debug payload
-    IO.inspect(request_payload, label: "GitHub Comment Payload")
+    dbg(url)
 
     try do
       response =
