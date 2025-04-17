@@ -251,10 +251,10 @@ defmodule AICodeReview do
         dbg(all_violations)
 
         # Fetch PR number and HEAD commit SHA *before* processing chunks
-        #        pr_number = get_pr_number()
-        #        head_commit_sha = get_head_commit_sha()
-        #        IO.puts("PR Number: #{pr_number}")
-        #        IO.puts("HEAD Commit SHA: #{head_commit_sha}")
+        pr_number = get_pr_number()
+        head_commit_sha = get_head_commit_sha()
+        IO.puts("PR Number: #{pr_number}")
+        IO.puts("HEAD Commit SHA: #{head_commit_sha}")
 
         Enum.each(all_violations, fn violation ->
           # Validate required fields before posting
@@ -263,15 +263,15 @@ defmodule AICodeReview do
           if Enum.all?(required_keys, &Map.has_key?(violation, &1)) do
             IO.puts("Posting suggestion for #{violation["file"]}:#{violation["line"]}...")
 
-            #            post_suggestion_comment(
-            #              pr_number,
-            #              head_commit_sha,
-            #              violation["file"],
-            #              violation["line"],
-            #              violation["message"],
-            #              violation["suggestion"],
-            #              violation["rule_file"]
-            #            )
+            post_suggestion_comment(
+              pr_number,
+              head_commit_sha,
+              violation["file"],
+              violation["line"],
+              violation["message"],
+              violation["suggestion"],
+              violation["rule_file"]
+            )
           else
             IO.puts("Warning: Skipping violation due to missing keys. Violation data:")
             IO.inspect(violation)
@@ -349,6 +349,7 @@ defmodule AICodeReview do
   defp get_pr_number do
     # GITHUB_REF for pull requests looks like "refs/pull/123/merge"
     github_ref = System.get_env("GITHUB_REF")
+    IO.inspect(Regex.run(~r{refs/pull/(\d+)/merge}, github_ref))
 
     case Regex.run(~r{refs/pull/(\d+)/merge}, github_ref) do
       [_, pr_num_str] ->
@@ -356,49 +357,11 @@ defmodule AICodeReview do
 
       _ ->
         # Fallback to API call if GITHUB_REF format isn't as expected
-        IO.puts(
-          "Could not extract PR number from GITHUB_REF '#{github_ref}'. Falling back to API call."
-        )
-
-        fetch_pr_number_from_api()
+        IO.puts("Could not extract PR number from GITHUB_REF '#{github_ref}'.")
     end
   rescue
     _ ->
-      IO.puts("Error parsing PR number from GITHUB_REF. Falling back to API call.")
-      fetch_pr_number_from_api()
-  end
-
-  defp fetch_pr_number_from_api do
-    # This uses the branch name, which might find multiple PRs if the branch
-    # name was reused. Using GITHUB_REF is generally more reliable.
-    url =
-      "#{@github_api}/repos/#{@repo}/pulls?head=#{@repo |> String.split("/") |> List.first()}:#{@pr_branch}&state=open"
-
-    IO.puts("Fetching PR number from API: #{url}")
-
-    response =
-      Req.get!(url,
-        headers: [
-          {"Authorization", "Bearer #{@github_token}"},
-          {"Accept", "application/vnd.github+json"},
-          {"X-GitHub-Api-Version", "2022-11-28"}
-        ]
-      )
-
-    case response.status do
-      200 ->
-        case Jason.decode!(response.body) do
-          # Take the first open PR found for the branch
-          [%{"number" => number} | _] ->
-            number
-
-          [] ->
-            raise "No open pull requests found via API for branch #{@pr_branch} in repo #{@repo}"
-        end
-
-      _ ->
-        raise "Failed to fetch PR number from API. Status: #{response.status}, Body: #{inspect(response.body)}"
-    end
+      IO.puts("Error parsing PR number from GITHUB_REF.")
   end
 
   # --- AI Interaction ---
@@ -587,7 +550,7 @@ defmodule AICodeReview do
     repo_url_base = "https://github.com/#{@repo}"
     # Ensure rule file path is relative for the link
     # Adjust base path if rules are elsewhere
-    rule_link_path = Path.join(".github/workflows", @rules_dir, rule_file)
+    rule_link_path = Path.join([@rules_dir, rule_file])
     # Link to rule in commit
     rule_link =
       "[View Rule](#{repo_url_base}/blob/#{get_head_commit_sha()}/#{@rules_dir}/#{rule_file})"
@@ -645,7 +608,7 @@ defmodule AICodeReview do
           json: request_payload,
           # Increase timeout for GitHub API calls as well
           # 1 minute
-          receive_timeout: 60_000
+          receive_timeout: 120_000
         )
 
       IO.puts(
