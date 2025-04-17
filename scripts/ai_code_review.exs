@@ -6,7 +6,7 @@ Mix.install([
 
 defmodule AICodeReview do
   @repo System.fetch_env!("GITHUB_REPOSITORY")
-  @pr_number System.fetch_env!("GITHUB_REF") |> String.split("/") |> List.last()
+  @pr_branch System.fetch_env!("GITHUB_HEAD_REF")
   @github_token System.fetch_env!("GITHUB_TOKEN")
   @openai_key System.fetch_env!("OPENAI_API_KEY")
 
@@ -37,10 +37,30 @@ defmodule AICodeReview do
   end
 
   defp get_pr_diff do
-    {out, 0} =
-      System.cmd("gh", ["pr", "diff", @pr_number, "--color=never"], stderr_to_stdout: true)
+    case System.cmd("gh", ["pr", "diff", @pr_branch, "--color=never"], stderr_to_stdout: true) do
+      {out, 0} ->
+        out
 
-    out
+      {output_or_error, code} ->
+        raise "Failed to get PR diff (exit #{code}): #{output_or_error}"
+    end
+  end
+
+  defp get_pr_number do
+    url = "https://api.github.com/repos/#{@repo}/pulls?head=#{@repo}:#{@pr_branch}"
+
+    response =
+      Req.get!(url,
+        headers: [
+          {"Authorization", "Bearer #{@github_token}"},
+          {"Accept", "application/vnd.github+json"}
+        ]
+      )
+
+    case Jason.decode!(response.body) do
+      [%{"number" => number} | _] -> number
+      [] -> raise "No pull requests found for branch #{@pr_branch}"
+    end
   end
 
   defp extract_green_lines(diff) do
@@ -52,6 +72,9 @@ defmodule AICodeReview do
   end
 
   defp analyze_with_ai(code, rules) do
+    dbg(code)
+    dbg(rules)
+
     rules_text =
       rules
       |> Enum.map(fn %{file: file, ast: ast} -> "- #{file}:\n#{flatten_md(ast)}" end)
@@ -83,6 +106,7 @@ defmodule AICodeReview do
         temperature: 0.2
       }
     )
+    |> dbg()
     |> Map.get(:body)
     |> Map.get("choices")
     |> List.first()
@@ -91,11 +115,13 @@ defmodule AICodeReview do
     |> Jason.decode!()
   end
 
-  defp post_comment(line_number, code, %{
+  defp post_comment(_line_number, _code, %{
          "message" => msg,
          "suggestion" => suggestion,
          "rule_file" => file
        }) do
+    pr_number = get_pr_number()
+
     body = """
     ⚠️ **AI Code Review Suggestion**
 
@@ -109,7 +135,7 @@ defmodule AICodeReview do
     📘 [View Rule](https://github.com/#{@repo}/blob/main/.ai-code-rules/#{file})
     """
 
-    Req.post!("https://api.github.com/repos/#{@repo}/issues/#{@pr_number}/comments",
+    Req.post!("https://api.github.com/repos/#{@repo}/issues/#{pr_number}/comments",
       headers: [
         {"Authorization", "Bearer #{@github_token}"},
         {"Content-Type", "application/json"}

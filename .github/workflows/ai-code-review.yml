@@ -11,19 +11,28 @@ jobs:
     steps:
       - uses: actions/checkout@v3
 
+      # It can be helpful to print specific context variables for debugging
+      - name: Print PR context
+        run: |
+          echo "Ref Name (github.ref_name): ${{ github.ref_name }}"
+          echo "Head Ref (github.head_ref): ${{ github.head_ref }}"
+          echo "Base Ref (github.base_ref): ${{ github.base_ref }}"
+          echo "Repository: ${{ github.repository }}"
+
       - name: Set up Elixir
         uses: erlef/setup-beam@v1
         with:
-          elixir-version: '1.17'
-          otp-version: '26.1'
+          elixir-version: '1.17' # Use the version you need
+          otp-version: '26.1'    # Use the version you need
 
       - name: Run AI Code Review
         run: |
           mkdir temp_runner
           cp scripts/ai_code_review.exs temp_runner/
-          cp -r .ai-code-rules temp_runner/
+          cp -r .ai-code-rules temp_runner/  # Make sure this path is correct relative to repo root
           cd temp_runner
           elixir ai_code_review.exs
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
