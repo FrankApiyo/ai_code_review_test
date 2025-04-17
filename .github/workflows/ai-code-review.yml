@@ -12,11 +12,26 @@ jobs:
       pull-requests: write
 
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout code
+        uses: actions/checkout@v3
         with:
           fetch-depth: 0
 
+      - name: Check if commit is co-authored by github-actions[bot]
+        id: check_bot
+        run: |
+          git fetch origin ${{ github.event.pull_request.head.ref }} --depth=1
+          LAST_COMMIT=$(git log origin/${{ github.event.pull_request.head.ref }} -1 --pretty="%B")
+          echo "Last commit message: $LAST_COMMIT"
+          if echo "$LAST_COMMIT" | grep -iq "Co-authored-by: github-actions\[bot\]"; then
+            echo "github-actions[bot] detected"
+            echo "skip=true" >> $GITHUB_OUTPUT
+          else
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Print PR context
+        if: steps.check_bot.outputs.skip != 'true'
         run: |
           echo "Ref Name (github.ref_name): ${{ github.ref_name }}"
           echo "Head Ref (github.head_ref): ${{ github.head_ref }}"
@@ -25,16 +40,18 @@ jobs:
           echo "Repository: ${{ github.repository }}"
 
       - name: Set up Elixir
+        if: steps.check_bot.outputs.skip != 'true'
         uses: erlef/setup-beam@v1
         with:
-          elixir-version: '1.17' # Use the version you need
-          otp-version: '26.1'    # Use the version you need
+          elixir-version: '1.17'
+          otp-version: '26.1'
 
       - name: Run AI Code Review
+        if: steps.check_bot.outputs.skip != 'true'
         run: |
           mkdir temp_runner
           cp scripts/ai_code_review.exs temp_runner/
-          cp -r .ai-code-rules temp_runner/  # Make sure this path is correct relative to repo root
+          cp -r .ai-code-rules temp_runner/
           cd temp_runner
           elixir ai_code_review.exs
         env:
