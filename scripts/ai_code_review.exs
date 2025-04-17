@@ -124,18 +124,19 @@ defmodule AICodeReview do
       else
         # Build the prompt for the current chunk
         prompt = build_prompt(chunk, rules)
-        IO.puts(prompt)
 
         # Print the generated prompt clearly
         IO.puts("\n--- Prompt for Chunk #{index + 1} ---")
-        # if !dry_run? do
-        #   IO.puts("===> Would send Chunk #{index + 1} to AI...")
-        #   # response = analyze_with_ai(prompt)
-        #   # IO.inspect(response, label: "AI Response for Chunk #{index + 1}")
-        #   # ... process response and post comments ...
-        # else
-        #   IO.puts("===> DRY RUN: Would send Chunk #{index + 1} to AI...")
-        # end
+
+        if !dry_run? do
+          IO.puts("===> Would send Chunk #{index + 1} to AI...")
+          response = review_code(prompt)
+          IO.inspect(response, label: "AI Response for Chunk #{index + 1}")
+        else
+          IO.puts("===> DRY RUN: Chunk #{index + 1} to AI...")
+          IO.puts(prompt)
+        end
+
         # ======================================================
       end
     end)
@@ -218,7 +219,7 @@ defmodule AICodeReview do
         """
         File: #{file}
         Line: #{line}
-        ```elixir
+        ```
         #{code}
         ```
         """
@@ -227,7 +228,7 @@ defmodule AICodeReview do
       |> Enum.join("\n\n---\n\n")
 
     """
-    Analyze the following Elixir code snippets based on the provided rules.
+    Analyze the following code snippets based on the provided rules.
     Each snippet includes its original file path and line number.
 
     Rules:
@@ -258,7 +259,7 @@ defmodule AICodeReview do
     """
   end
 
-  defp analyze_with_ai(prompt) do
+  defp analyze_with_open_ai(prompt) do
     Req.post!("https://api.openai.com/v1/chat/completions",
       headers: [
         {"Authorization", "Bearer #{@openai_key}"},
@@ -267,18 +268,64 @@ defmodule AICodeReview do
       json: %{
         model: "gpt-4o",
         messages: [
-          %{role: "system", content: "You are an Elixir code reviewer."},
+          %{role: "system", content: "You are a keen code reviewer."},
           %{role: "user", content: prompt}
         ],
         temperature: 0.2
       }
     )
     |> Map.get(:body)
+    |> dbg()
     |> Map.get("choices")
     |> List.first()
     |> Map.get("message")
     |> Map.get("content")
     |> Jason.decode!()
+  end
+
+  @gemini_endpoint "https://generativelanguage.googleapis.com/v1beta/models"
+
+  defp analyze_with_gemini(prompt, api_key, model \\ "gemini-1.5-pro-latest") do
+    system_instruction = "You are a code reviewer. Please respond *only* with valid JSON."
+    full_prompt = system_instruction <> "\n\n" <> prompt
+
+    url = "#{@gemini_endpoint}/#{model}:generateContent?key=#{api_key}"
+
+    request_body = %{
+      "contents" => [
+        %{
+          "role" => "user",
+          "parts" => [%{"text" => full_prompt}]
+        }
+      ],
+      "generationConfig" => %{
+        "temperature" => 0.2,
+        "response_mime_type" => "application/json"
+      }
+    }
+
+    Req.post!(url,
+      headers: [
+        {"Content-Type", "application/json"}
+      ],
+      json: request_body,
+      receive_timeout: 360_000
+    )
+    |> Map.get(:body)
+    |> Map.get("candidates")
+    |> List.first()
+    |> Map.get("content")
+    |> Map.get("parts")
+    |> List.first()
+    |> Map.get("text")
+    |> Jason.decode!()
+  end
+
+  def get_gemini_key(), do: System.get_env("GEMINI_API_KEY")
+
+  def review_code(prompt) do
+    api_key = get_gemini_key()
+    analyze_with_gemini(prompt, api_key)
   end
 
   defp post_comment(line_number, _code, %{
@@ -294,7 +341,7 @@ defmodule AICodeReview do
     > #{msg}
 
     **Suggested fix:**
-    ```elixir
+    ```
     #{suggestion}
     ```
 
