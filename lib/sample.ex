@@ -1,6 +1,5 @@
 defmodule Sample do
   def unix_five_min_from_now do
-    # Get the current time
     now = DateTime.utc_now()
 
     # Convert it to a Unix timestamp
