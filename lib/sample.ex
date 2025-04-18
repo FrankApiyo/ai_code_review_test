@@ -1,5 +1,4 @@
 defmodule Sample do
-  # This function returns a time 5 minutes from now
   def unix_five_min_from_now do
     # Get the current time
     now = DateTime.utc_now()
