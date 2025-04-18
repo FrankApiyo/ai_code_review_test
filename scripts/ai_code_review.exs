@@ -317,7 +317,7 @@ defmodule AICodeReview do
 
     text_content =
       response.body
-      |> Map.get("candidates")
+      response.body |> Map.fetch!("candidates")
       |> case do
         [candidate | _] -> candidate |> Map.get("content") |> Map.get("parts")
         _ -> nil
