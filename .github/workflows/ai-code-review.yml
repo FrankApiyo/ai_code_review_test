@@ -50,7 +50,7 @@ jobs:
         if: steps.check_bot.outputs.skip != 'true'
         run: |
           mkdir temp_runner
-          cp scripts/ai_code_review.exs temp_runner/
+          cp scripts/*.{exs,ex} temp_runner/
           cp -r .ai-code-rules temp_runner/
           cd temp_runner
           elixir ai_code_review.exs
