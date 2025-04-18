@@ -24,7 +24,7 @@ defmodule GitUtils do
     IO.puts("Fetching base ref '#{base_ref}' from origin...")
 
     case System.cmd("git", ["fetch", "--depth=1", "origin", base_ref], stderr_to_stdout: true) do
-      {output, 0} ->
+      {_output, 0} ->
         IO.puts("Fetch successful.")
 
       {error_out, code} ->
