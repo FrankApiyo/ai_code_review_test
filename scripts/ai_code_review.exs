@@ -7,19 +7,14 @@ Mix.install([
 
 Code.require_file("diff_parser.ex", __DIR__)
 Code.require_file("git_utils.ex", __DIR__)
+Code.require_file("github_comment.ex", __DIR__)
 
 defmodule AICodeReview do
-  # e.g., "owner/repo"
   @repo System.fetch_env!("GITHUB_REPOSITORY")
   @head_sha System.fetch_env!("PR_HEAD_SHA")
-  # Branch being merged
   @pr_branch System.fetch_env!("GITHUB_HEAD_REF")
-  # Branch being merged into
   @base_ref System.fetch_env!("GITHUB_BASE_REF")
   @github_token System.fetch_env!("GITHUB_TOKEN")
-  # @github_sha System.fetch_env!("GITHUB_SHA") # Often the merge commit, might need HEAD commit
-
-  # --- Constants ---
   @gemini_endpoint "https://generativelanguage.googleapis.com/v1beta/models"
   @github_api "https://api.github.com"
   @rules_dir ".ai-code-rules"
@@ -125,7 +120,7 @@ defmodule AICodeReview do
         dbg(all_violations)
 
         # Fetch PR number and HEAD commit SHA *before* processing chunks
-        pr_number = get_pr_number()
+        pr_number = GithubComment.get_pr_number()
         IO.puts("PR Number: #{pr_number}")
         IO.puts("HEAD Commit SHA: #{@head_sha}")
 
@@ -136,14 +131,19 @@ defmodule AICodeReview do
           if Enum.all?(required_keys, &Map.has_key?(violation, &1)) do
             IO.puts("Posting suggestion for #{violation["file"]}:#{violation["line"]}...")
 
-            post_suggestion_comment(
+            comment_body =
+              build_suggestion_body(
+                violation["message"],
+                violation["suggestion"],
+                violation["rule_file"]
+              )
+
+            GithubComment.post_suggestion_comment(
               pr_number,
               @head_sha,
               violation["file"],
               violation["line"],
-              violation["message"],
-              violation["suggestion"],
-              violation["rule_file"]
+              comment_body
             )
           else
             IO.puts("Warning: Skipping violation due to missing keys. Violation data:")
@@ -188,24 +188,6 @@ defmodule AICodeReview do
 
       []
     end
-  end
-
-  defp get_pr_number do
-    # GITHUB_REF for pull requests looks like "refs/pull/123/merge"
-    github_ref = System.get_env("GITHUB_REF")
-    IO.inspect(Regex.run(~r{refs/pull/(\d+)/merge}, github_ref))
-
-    case Regex.run(~r{refs/pull/(\d+)/merge}, github_ref) do
-      [_, pr_num_str] ->
-        String.to_integer(pr_num_str)
-
-      _ ->
-        # Fallback to API call if GITHUB_REF format isn't as expected
-        IO.puts("Could not extract PR number from GITHUB_REF '#{github_ref}'.")
-    end
-  rescue
-    _ ->
-      IO.puts("Error parsing PR number from GITHUB_REF.")
   end
 
   # --- AI Interaction ---
@@ -414,67 +396,6 @@ defmodule AICodeReview do
     *Rule: #{rule_file} (#{rule_link})*
     """
   end
-
-  # Renamed and modified function
-  defp post_suggestion_comment(
-         pr_number,
-         commit_id,
-         file_path,
-         line_number,
-         message,
-         suggestion,
-         rule_file
-       ) do
-    url = "#{@github_api}/repos/#{@repo}/pulls/#{pr_number}/comments"
-
-    comment_body = build_suggestion_body(message, suggestion, rule_file)
-
-    request_payload = %{
-      body: comment_body,
-      commit_id: commit_id,
-      path: file_path,
-      line: line_number,
-      side: "RIGHT"
-    }
-
-    dbg(request_payload)
-
-    # Debug payload
-    IO.inspect(request_payload, label: "GitHub Comment Payload")
-
-    try do
-      response =
-        Req.post!(url,
-          headers: [
-            {"Authorization", "Bearer #{@github_token}"},
-            {"Accept", "application/vnd.github+json"},
-            {"X-GitHub-Api-Version", "2022-11-28"}
-          ],
-          json: request_payload,
-          # Increase timeout for GitHub API calls as well
-          # 1 minute
-          receive_timeout: 120_000
-        )
-
-      dbg(response)
-
-      IO.puts(
-        "Successfully posted comment to #{file_path}:#{line_number}. Status: #{response.status}"
-      )
-
-      # IO.inspect(response.body) # Debug response body if needed
-    rescue
-      e ->
-        IO.puts("Error posting comment to GitHub for #{file_path}:#{line_number}: #{inspect(e)}")
-    end
-  end
-
-  # --- Utility Functions ---
-  # Removed flatten_md as it's no longer used with raw rule content
-  # defp flatten_md(ast) do ... end
-
-  # Removed extract_changed_code as DiffParser handles line selection now
-  # defp extract_changed_code(diff) do ... end
 end
 
 # Run the script
