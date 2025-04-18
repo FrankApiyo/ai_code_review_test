@@ -6,7 +6,6 @@ defmodule Sample do
     # Convert it to a Unix timestamp
     unix_now = DateTime.to_unix(now, :second)
 
-    # Add five minutes in seconds
     unix_now + 60 * 5
   end
 end
