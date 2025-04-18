@@ -255,6 +255,8 @@ defmodule AICodeReview do
          - "rule_file": The filename of the rule that was violated (e.g., "comments-overuse.md").
          - "message": A concise explanation of WHY the code violates the specific rule.
          - "suggestion": A code change suggestion formatted for GitHub's suggestion syntax. This should be the complete code to replace the affected line(s). If the suggestion is to remove lines, provide an empty string "".
+                    - for suggestions, Make sure you don't replace a line entirely when you can just modify it
+                    - in addition, while writing suggestions, make sure to suggest the change based on the context (the lines before and after the line(s) you are changing)
        - This object MAY optionally include:
          - "end_line": If the violation and suggestion span MULTIPLE lines, provide the line number of the LAST affected line in the original file. If the violation affects only a single line, you can omit this field or set it equal to "line".
     4. If a snippet violates multiple rules, create a SEPARATE JSON object for EACH violation.
