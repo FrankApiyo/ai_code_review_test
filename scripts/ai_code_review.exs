@@ -157,6 +157,7 @@ defmodule AICodeReview do
     IO.puts("PR Branch: #{@pr_branch}")
     IO.puts("Base Branch: #{@base_ref}")
 
+    # check dry run flag
     dry_run? = Enum.member?(System.argv(), "--dry-run")
     IO.puts("Dry Run: #{dry_run?}")
 
@@ -622,6 +623,5 @@ defmodule AICodeReview do
   # defp extract_changed_code(diff) do ... end
 end
 
-# --- Run the script ---
-# test
+# Run the script
 AICodeReview.run()
