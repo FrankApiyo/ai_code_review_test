@@ -41,7 +41,6 @@ defmodule AICodeReview do
 
     chunks = chunk_lines(added_lines_with_context)
     IO.puts("Split added lines into #{Enum.count(chunks)} chunks for AI review.")
-    dbg(Enum.count(chunks))
 
     all_violations =
       Enum.with_index(chunks)
@@ -252,7 +251,9 @@ defmodule AICodeReview do
          - "file": The exact file path provided for the snippet.
          - "line": The exact STARTING line number provided for the snippet where the violation begins.
          - "violation": MUST be boolean `true`.
-         - "rule_file": The filename of the rule that was violated (e.g., "comments-overuse.md").
+         - "rule_file": The filename of the rule that was violated (e.g., "code-anti-patterns.md").
+            - **IMPORTANT:**  the rule file must be the name of the markdown file that start with 'Rule File:'
+            - The 'rule_file' may optionally include the section of the file from which the rule is read (e.g. code-anti-patterns.md#style-guide)
          - "message": A concise explanation of WHY the code violates the specific rule.
          - "suggestion": A code change suggestion formatted for GitHub's suggestion syntax.
             - Provide the COMPLETE, CORRECTED content for the line(s) affected by the violation.
@@ -269,7 +270,7 @@ defmodule AICodeReview do
       "file": "path/to/some/file.ex",
       "line": 25, // Assuming original line was: unix_now = DateTime.to_unix(now, :second) # I also want you...
       "violation": true,
-      "rule_file": "no-unnecessary-comments.md",
+      "rule_file": "code-anti-patterns.md#no-unnecessary-comments", // was passed in like this: - Rule File: code-anti-patterns.md
       "message": "The comment on this line is unnecessary and should be removed.",
       "suggestion": "unix_now = DateTime.to_unix(now, :second)"
     }
@@ -279,7 +280,7 @@ defmodule AICodeReview do
       "file": "path/to/original/file.ex",
       "line": 15,
       "violation": true,
-      "rule_file": "style-guide.md",
+      "rule_file": "code-anti-patterns.md#style-guide",  // was passed in like this: - Rule File: code-anti-patterns.md
       "message": "Inconsistent spacing.",
       "suggestion": "  def my_func(arg1, arg2)"
     }
@@ -290,7 +291,7 @@ defmodule AICodeReview do
       "line": 42,
       "end_line": 44,
       "violation": true,
-      "rule_file": "refactoring-rule.md",
+      "rule_file": "code-anti-patterns.md#refactoring-rule",   // was passed in like this: - Rule File: code-anti-patterns.md
       "message": "This block can be simplified using Enum.map/2.",
       "suggestion": "result = Enum.map(items, fn item -> process(item) end)"
     }
