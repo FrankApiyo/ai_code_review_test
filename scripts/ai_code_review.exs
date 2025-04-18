@@ -82,13 +82,23 @@ defmodule AICodeReview do
       IO.puts("DRY RUN: Skipping posting comments to GitHub.")
 
       Enum.each(all_violations, fn violation ->
-        IO.puts("DRY RUN: Would post suggestion for #{violation["file"]}:#{violation["line"]}")
+        start_line = violation["line"]
+        end_line = violation["end_line"]
+
+        line_info =
+          if end_line && end_line != start_line,
+            do: "#{start_line}-#{end_line}",
+            else: "#{start_line}"
+
+        IO.puts("DRY RUN: Would post suggestion for #{violation["file"]}:#{line_info}")
 
         dbg(
           build_suggestion_body(
             violation["message"],
             violation["suggestion"],
-            violation["rule_file"]
+            violation["rule_file"],
+            start_line,
+            end_line
           )
         )
       end)
@@ -109,24 +119,38 @@ defmodule AICodeReview do
           required_keys = ["file", "line", "message", "suggestion", "rule_file"]
 
           if Enum.all?(required_keys, &Map.has_key?(violation, &1)) do
-            IO.puts("Posting suggestion for #{violation["file"]}:#{violation["line"]}...")
+            start_line = violation["line"]
+            end_line = violation["end_line"]
+
+            line_info =
+              if end_line && end_line != start_line,
+                do: "#{start_line}-#{end_line}",
+                else: "#{start_line}"
+
+            IO.puts("Posting suggestion for #{violation["file"]}:#{line_info}...")
 
             comment_body =
               build_suggestion_body(
                 violation["message"],
                 violation["suggestion"],
-                violation["rule_file"]
+                violation["rule_file"],
+                start_line,
+                end_line
               )
 
             GithubComment.post_suggestion_comment(
               pr_number,
               @head_sha,
               violation["file"],
-              violation["line"],
+              start_line,
+              end_line,
               comment_body
             )
           else
-            IO.puts("Warning: Skipping violation due to missing keys. Violation data:")
+            IO.puts(
+              "Warning: Skipping violation due to missing required keys (#{Enum.join(required_keys, ", ")}). Violation data:"
+            )
+
             IO.inspect(violation)
           end
         end)
@@ -197,7 +221,7 @@ defmodule AICodeReview do
       |> Enum.map(fn %{file: file, line: line, code: code} ->
         """
         File: #{file}
-        Line: #{line}
+        Start Line: #{line}
         ```
         #{code}
         ```
@@ -207,7 +231,7 @@ defmodule AICodeReview do
 
     """
     You are an AI code reviewer. Analyze the following code snippets based ONLY on the provided rules.
-    Each snippet includes its original file path and the line number where the added code begins.
+    Each snippet includes its original file path and the STARTING line number where the added code begins.
 
     Rules:
     #{rules_text}
@@ -226,26 +250,35 @@ defmodule AICodeReview do
        - Create a JSON object within the list.
        - This object MUST include:
          - "file": The exact file path provided for the snippet.
-         - "line": The exact line number provided for the snippet.
+         - "line": The exact STARTING line number provided for the snippet where the violation begins.
          - "violation": MUST be boolean `true`.
          - "rule_file": The filename of the rule that was violated (e.g., "comments-overuse.md").
          - "message": A concise explanation of WHY the code violates the specific rule.
-         - "suggestion": A code change suggestion for the developer to fix the violation. This should be the code the developer can apply. If the suggestion is to remove the line, provide an empty string ""
-         - the suggestion should be the code that can be used to replace the line (code that should be in place of what is currently on the line)
-      - look at each line carefully please and don't have a line replaced with "" when it could have been edited a different way. you are a pro. reviewer
-                        
-                        
+         - "suggestion": A code change suggestion formatted for GitHub's suggestion syntax. This should be the complete code to replace the affected line(s). If the suggestion is to remove lines, provide an empty string "".
+       - This object MAY optionally include:
+         - "end_line": If the violation and suggestion span MULTIPLE lines, provide the line number of the LAST affected line in the original file. If the violation affects only a single line, you can omit this field or set it equal to "line".
     4. If a snippet violates multiple rules, create a SEPARATE JSON object for EACH violation.
     5. If NO violations are found in ANY of the provided snippets, respond with an empty JSON list: [].
 
-    Example of a valid response object within the list:
+    Example of a valid response object (single line):
     {
       "file": "path/to/original/file.ex",
       "line": 15,
       "violation": true,
-      "rule_file": "comments-overuse.md",
-      "message": "This comment explains self-evident code.",
-      "suggestion": ""
+      "rule_file": "style-guide.md",
+      "message": "Inconsistent spacing.",
+      "suggestion": "  def my_func(arg1, arg2)"
+    }
+
+    Example of a valid response object (multi-line):
+    {
+      "file": "path/to/another/file.ex",
+      "line": 42,
+      "end_line": 44,
+      "violation": true,
+      "rule_file": "refactoring-rule.md",
+      "message": "This block can be simplified using Enum.map/2.",
+      "suggestion": "result = Enum.map(items, fn item -> process(item) end)"
     }
 
     JSON Response:
@@ -278,6 +311,7 @@ defmodule AICodeReview do
           {"Content-Type", "application/json"}
         ],
         json: request_body,
+        # 6 minutes
         receive_timeout: 360_000
       )
 
@@ -305,10 +339,13 @@ defmodule AICodeReview do
       cleaned_text
     else
       finish_reason =
-        response.body |> Map.get("candidates") |> List.first() |> Map.get("finishReason")
+        response.body
+        |> Map.get("candidates")
+        |> List.first()
+        |> Map.get("finishReason", "UNKNOWN")
 
       safety_ratings =
-        response.body |> Map.get("candidates") |> List.first() |> Map.get("safetyRatings")
+        response.body |> Map.get("candidates") |> List.first() |> Map.get("safetyRatings", [])
 
       raise """
       Failed to extract text content from Gemini response.
@@ -319,15 +356,20 @@ defmodule AICodeReview do
     end
   end
 
-  defp build_suggestion_body(message, suggestion, rule_file) do
+  defp build_suggestion_body(message, suggestion, rule_file, start_line, end_line \\ nil) do
     repo_url_base = "https://github.com/#{@repo}"
-    rule_link_path = Path.join([@rules_dir, rule_file])
+    rule_link_path = Path.join([@rules_dir, rule_file]) |> String.replace("\\", "/")
+    rule_link = "[View Rule](#{repo_url_base}/blob/#{@head_sha}/#{rule_link_path})"
 
-    rule_link =
-      "[View Rule](#{repo_url_base}/blob/#{@head_sha}/#{@rules_dir}/#{rule_file})"
+    line_indicator =
+      if end_line && end_line != start_line do
+        "(Lines #{start_line}-#{end_line})"
+      else
+        "(Line #{start_line})"
+      end
 
     """
-    🤖 **AI Code Review Suggestion**
+    🤖 **AI Code Review Suggestion** #{line_indicator}
 
     **Issue:**
     > #{message}

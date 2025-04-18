@@ -242,6 +242,7 @@ defmodule SuggestMissingTests do
               @head_sha,
               suggestion["file"],
               suggestion["line"],
+              nil,
               test_suggestion
             )
           else

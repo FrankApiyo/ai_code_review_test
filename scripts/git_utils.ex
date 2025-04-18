@@ -1,5 +1,3 @@
-# scripts/git_utils.ex
-
 defmodule GitUtils do
   @moduledoc """
   Provides utility functions for interacting with Git.
