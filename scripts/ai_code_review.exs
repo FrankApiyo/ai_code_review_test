@@ -254,13 +254,27 @@ defmodule AICodeReview do
          - "violation": MUST be boolean `true`.
          - "rule_file": The filename of the rule that was violated (e.g., "comments-overuse.md").
          - "message": A concise explanation of WHY the code violates the specific rule.
-         - "suggestion": A code change suggestion formatted for GitHub's suggestion syntax. This should be the complete code to replace the affected line(s). If the suggestion is to remove lines, provide an empty string "".
-       - This object MAY optionally include:
+         - "suggestion": A code change suggestion formatted for GitHub's suggestion syntax.
+            - Provide the COMPLETE, CORRECTED content for the line(s) affected by the violation.
+            - **IMPORTANT:** If only PART of a line violates the rule (e.g., an unnecessary comment, incorrect spacing), provide the ENTIRE corrected line, modifying only the violating part. Do NOT suggest deleting the whole line unless the entire line's content is the violation and needs removal.
+            - If the suggestion IS to remove the line(s) entirely, provide an empty string "".
+            - Base your suggestion on the surrounding code context.
+        - This object MAY optionally include:
          - "end_line": If the violation and suggestion span MULTIPLE lines, provide the line number of the LAST affected line in the original file. If the violation affects only a single line, you can omit this field or set it equal to "line".
     4. If a snippet violates multiple rules, create a SEPARATE JSON object for EACH violation.
     5. If NO violations are found in ANY of the provided snippets, respond with an empty JSON list: [].
 
-    Example of a valid response object (single line):
+    Example of a valid response object (single line modification - removing comment):
+    {
+      "file": "path/to/some/file.ex",
+      "line": 25, // Assuming original line was: unix_now = DateTime.to_unix(now, :second) # I also want you...
+      "violation": true,
+      "rule_file": "no-unnecessary-comments.md",
+      "message": "The comment on this line is unnecessary and should be removed.",
+      "suggestion": "unix_now = DateTime.to_unix(now, :second)"
+    }
+
+    Example of a valid response object (single line replacement):
     {
       "file": "path/to/original/file.ex",
       "line": 15,
@@ -270,7 +284,7 @@ defmodule AICodeReview do
       "suggestion": "  def my_func(arg1, arg2)"
     }
 
-    Example of a valid response object (multi-line):
+    Example of a valid response object (multi-line replacement):
     {
       "file": "path/to/another/file.ex",
       "line": 42,
@@ -317,9 +331,9 @@ defmodule AICodeReview do
 
     text_content =
       response.body
-      response.body |> Map.fetch!("candidates")
+      |> Map.fetch!("candidates")
       |> case do
-        [candidate | _] -> candidate |> Map.get("content") |> Map.get("parts")
+        [candidate | _] -> candidate |> Map.fetch!("content") |> Map.fetch!("parts")
         _ -> nil
       end
       |> case do

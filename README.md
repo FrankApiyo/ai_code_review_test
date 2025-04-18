@@ -1,21 +1,14 @@
-# AiCodeReviewTest
+# AI Code Review & Test Generation CI
 
-**TODO: Add description**
+This project implements GitHub Actions workflows to automate aspects of code review and testing using AI.
 
-## Installation
+## Features
 
-If [available in Hex](https://hex.pm/docs/publish), the package can be installed
-by adding `ai_code_review_test` to your list of dependencies in `mix.exs`:
-
-```elixir
-def deps do
-  [
-    {:ai_code_review_test, "~> 0.1.0"}
-  ]
-end
-```
-
-Documentation can be generated with [ExDoc](https://github.com/elixir-lang/ex_doc)
-and published on [HexDocs](https://hexdocs.pm). Once published, the docs can
-be found at <https://hexdocs.pm/ai_code_review_test>.
-
+1. AI Code Review
+   Custom Rule Enforcement: Define project-specific coding conventions and anti-patterns in markdown files within an .ai-code-rules/ directory in your repository. These rules can capture nuances beyond static analysis capabilities (inspired by conventions like Elixir's anti-patterns).
+   An AI-generated suggestion on how to modify the code to comply with the rule, allowing developers to potentially accept the suggestion directly.
+   ![AI code review](code_review.png)
+2. AI Test Writer
+   Test Coverage Monitoring: A GitHub Action monitors test coverage for newly added lines of code in pull requests.
+   Automated Test Generation/Suggestion: If new lines lack test coverage, the action adds comment with Suggestions.
+   ![AI test suggestion](test_suggestion.png)
