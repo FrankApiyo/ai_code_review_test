@@ -49,7 +49,10 @@ jobs:
       - name: Run AI Code Review
         if: steps.check_bot.outputs.skip != 'true'
         run: |
+          mix deps.get
+          MIX_ENV=test mix coveralls.json
           mkdir temp_runner
+          mv cover temp_runner/
           cp scripts/*.{exs,ex} temp_runner/
           cp -r .ai-code-rules temp_runner/
           cd temp_runner
