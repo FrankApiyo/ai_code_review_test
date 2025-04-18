@@ -1,0 +1,42 @@
+---
+name: AI Code Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  check_bot_commit:
+    runs-on: ubuntu-latest
+    outputs:
+      skip: ${{ steps.check_bot.outputs.skip }}
+    steps:
+      - name: Checkout code for commit check
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 1
+      - name: Check if commit is co-authored by github-actions[bot]
+        id: check_bot
+        run: |
+          LAST_COMMIT=$(git log -1 --pretty="%B")
+          echo "Last commit message: $LAST_COMMIT"
+          if echo "$LAST_COMMIT" | grep -iq "Co-authored-by: github-actions\[bot\]"; then
+            echo "github-actions[bot] detected"
+            echo "skip=true" >> $GITHUB_OUTPUT
+          else
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
+
+  run_ai_review:
+    needs: check_bot_commit
+    if: needs.check_bot_commit.outputs.skip != 'true'
+    uses: ./.github/workflows/reusable_ai_setup.yml
+    with:
+      script_to_run: ai_code_review.exs
+      run_coverage_commands: false
+    secrets:
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+    permissions:
+      contents: read
+      pull-requests: write
