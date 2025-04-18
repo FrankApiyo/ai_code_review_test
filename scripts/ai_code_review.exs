@@ -63,39 +63,31 @@ defmodule AICodeReview do
           IO.puts("\n--- Processing Chunk #{chunk_index} ---")
           prompt = build_prompt(chunk, rules)
 
-          if dry_run? do
-            IO.puts("===> DRY RUN: Would send Chunk #{chunk_index} to AI...")
-            IO.puts("--- Prompt for Chunk #{chunk_index} ---")
-            IO.puts(prompt)
-            # Return empty list in dry run
-            []
-          else
-            IO.puts("===> Sending Chunk #{chunk_index} to AI for review...")
+          IO.puts("===> Sending Chunk #{chunk_index} to AI for review...")
 
-            try do
-              # Send to AI and parse response
-              response_text = review_code_with_gemini(prompt)
+          try do
+            # Send to AI and parse response
+            response_text = review_code_with_gemini(prompt)
 
-              # IO.inspect(response_text, label: "Raw AI Response Text for Chunk #{chunk_index}") # Debug raw text
-              # Decode JSON response
-              dbg(response_text)
-              violations = Jason.decode!(response_text)
+            # IO.inspect(response_text, label: "Raw AI Response Text for Chunk #{chunk_index}") # Debug raw text
+            # Decode JSON response
+            dbg(response_text)
+            violations = Jason.decode!(response_text)
 
-              IO.puts(
-                "Received and parsed AI response for Chunk #{chunk_index}. Found #{Enum.count(violations)} potential violations."
-              )
+            IO.puts(
+              "Received and parsed AI response for Chunk #{chunk_index}. Found #{Enum.count(violations)} potential violations."
+            )
 
-              # IO.inspect(violations, label: "Parsed Violations for Chunk #{chunk_index}")
-              # Return list of violations for this chunk
-              violations
-            rescue
-              e ->
-                IO.puts("Error processing AI response for Chunk #{chunk_index}: #{inspect(e)}")
-                # Optionally inspect the raw response if decoding failed
-                # IO.inspect(response_text, label: "Failed Raw AI Response for Chunk #{chunk_index}")
-                # Return empty list on error
-                []
-            end
+            # IO.inspect(violations, label: "Parsed Violations for Chunk #{chunk_index}")
+            # Return list of violations for this chunk
+            violations
+          rescue
+            e ->
+              IO.puts("Error processing AI response for Chunk #{chunk_index}: #{inspect(e)}")
+              # Optionally inspect the raw response if decoding failed
+              # IO.inspect(response_text, label: "Failed Raw AI Response for Chunk #{chunk_index}")
+              # Return empty list on error
+              []
           end
         end
       end)
@@ -108,7 +100,14 @@ defmodule AICodeReview do
 
       Enum.each(all_violations, fn violation ->
         IO.puts("DRY RUN: Would post suggestion for #{violation["file"]}:#{violation["line"]}")
-        # IO.inspect(violation) # Optionally print violation details in dry run
+
+        dbg(
+          build_suggestion_body(
+            violation["message"],
+            violation["suggestion"],
+            violation["rule_file"]
+          )
+        )
       end)
     else
       dbg(all_violations)
