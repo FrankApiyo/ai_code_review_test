@@ -2,7 +2,6 @@ defmodule Sample do
   def unix_five_min_from_now do
     now = DateTime.utc_now()
 
-    # Convert it to a Unix timestamp
     unix_now = DateTime.to_unix(now, :second)
 
     unix_now + 60 * 5
