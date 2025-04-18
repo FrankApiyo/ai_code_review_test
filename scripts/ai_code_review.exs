@@ -1,4 +1,3 @@
-# test
 Mix.install([
   {:req, "~> 0.4.5"},
   {:jason, "~> 1.4"},
@@ -25,19 +24,14 @@ defmodule AICodeReview do
     IO.puts("PR Branch: #{@pr_branch}")
     IO.puts("Base Branch: #{@base_ref}")
 
-    # check dry run flag
     dry_run? = Enum.member?(System.argv(), "--dry-run")
     IO.puts("Dry Run: #{dry_run?}")
 
-    # --- Get Required Info ---
     rules = load_rules(@rules_dir)
     IO.puts("Loaded #{Enum.count(rules)} rules from #{@rules_dir}.")
 
     diff = GitUtils.get_pr_diff(@base_ref)
     IO.puts("Fetched PR diff.")
-    # IO.puts("--- DIFF START ---")
-    # IO.puts(diff)
-    # IO.puts("--- DIFF END ---")
 
     added_lines_with_context = DiffParser.parse(diff)
 
@@ -45,7 +39,6 @@ defmodule AICodeReview do
       "Parsed diff, found #{Enum.count(added_lines_with_context)} added lines with context."
     )
 
-    # --- Process Chunks ---
     chunks = chunk_lines(added_lines_with_context)
     IO.puts("Split added lines into #{Enum.count(chunks)} chunks for AI review.")
     dbg(Enum.count(chunks))
@@ -57,7 +50,6 @@ defmodule AICodeReview do
 
         if Enum.empty?(chunk) do
           IO.puts("--- Chunk #{chunk_index}: SKIPPED (Empty Chunk) ---")
-          # Return empty list for empty chunk
           []
         else
           IO.puts("\n--- Processing Chunk #{chunk_index} ---")
@@ -66,11 +58,8 @@ defmodule AICodeReview do
           IO.puts("===> Sending Chunk #{chunk_index} to AI for review...")
 
           try do
-            # Send to AI and parse response
             response_text = review_code_with_gemini(prompt)
 
-            # IO.inspect(response_text, label: "Raw AI Response Text for Chunk #{chunk_index}") # Debug raw text
-            # Decode JSON response
             dbg(response_text)
             violations = Jason.decode!(response_text)
 
@@ -78,21 +67,15 @@ defmodule AICodeReview do
               "Received and parsed AI response for Chunk #{chunk_index}. Found #{Enum.count(violations)} potential violations."
             )
 
-            # IO.inspect(violations, label: "Parsed Violations for Chunk #{chunk_index}")
-            # Return list of violations for this chunk
             violations
           rescue
             e ->
               IO.puts("Error processing AI response for Chunk #{chunk_index}: #{inspect(e)}")
-              # Optionally inspect the raw response if decoding failed
-              # IO.inspect(response_text, label: "Failed Raw AI Response for Chunk #{chunk_index}")
-              # Return empty list on error
               []
           end
         end
       end)
 
-    # --- Post Comments to GitHub ---
     IO.puts("\n--- Posting Suggestions to GitHub ---")
 
     if dry_run? do
@@ -118,13 +101,11 @@ defmodule AICodeReview do
         IO.puts("Found #{Enum.count(all_violations)} violations. Posting suggestions...")
         dbg(all_violations)
 
-        # Fetch PR number and HEAD commit SHA *before* processing chunks
         pr_number = GithubComment.get_pr_number()
         IO.puts("PR Number: #{pr_number}")
         IO.puts("HEAD Commit SHA: #{@head_sha}")
 
         Enum.each(all_violations, fn violation ->
-          # Validate required fields before posting
           required_keys = ["file", "line", "message", "suggestion", "rule_file"]
 
           if Enum.all?(required_keys, &Map.has_key?(violation, &1)) do
@@ -167,18 +148,13 @@ defmodule AICodeReview do
 
         try do
           content = File.read!(path)
-          # Use Earmark to parse, but flatten_md is simpler for prompt generation
-          # {:ok, md, _} = Earmark.as_ast(content)
-          # Store raw content for simpler flatten_md
           %{file: file, content: content}
         rescue
           e ->
             IO.puts("Error reading or parsing rule file #{path}: #{inspect(e)}")
-            # Skip this file
             nil
         end
       end)
-      # Remove files that failed to load/parse
       |> Enum.reject(&is_nil/1)
     else
       IO.puts(
@@ -189,25 +165,18 @@ defmodule AICodeReview do
     end
   end
 
-  # --- AI Interaction ---
-
   defp chunk_lines(lines_with_context, max_chars \\ 12_000) do
     Enum.reduce(lines_with_context, {[], [], 0}, fn %{code: code} = line_data,
                                                     {chunks, current_chunk, char_count} ->
-      # Estimate size: code length + file/line info overhead (approx 50 chars)
       line_size = String.length(code) + 50
 
-      # If adding the current line exceeds max_chars AND the current chunk is not empty,
-      # finalize the current chunk and start a new one with the current line.
       if char_count + line_size > max_chars and char_count > 0 do
         {[Enum.reverse(current_chunk) | chunks], [line_data], line_size}
       else
-        # Otherwise, add the current line to the current chunk.
         {chunks, [line_data | current_chunk], char_count + line_size}
       end
     end)
     |> then(fn {chunks, last_chunk, _} ->
-      # Add the last chunk if it's not empty
       final_chunks =
         if Enum.empty?(last_chunk), do: chunks, else: [Enum.reverse(last_chunk) | chunks]
 
@@ -218,7 +187,6 @@ defmodule AICodeReview do
   defp build_prompt(chunk, rules) do
     rules_text =
       rules
-      # Use raw content now
       |> Enum.map(fn %{file: file, content: content} ->
         "- Rule File: #{file}\n```markdown\n#{content}\n```"
       end)
@@ -235,7 +203,6 @@ defmodule AICodeReview do
         ```
         """
       end)
-      # Separator between snippets
       |> Enum.join("\n---\n")
 
     """
@@ -288,29 +255,19 @@ defmodule AICodeReview do
   def get_gemini_key(),
     do: System.get_env("GEMINI_API_KEY") || raise("GEMINI_API_KEY environment variable not set")
 
-  # Using Flash for potential speed/cost benefit
   def review_code_with_gemini(prompt, model \\ "gemini-2.0-flash") do
     api_key = get_gemini_key()
     url = "#{@gemini_endpoint}/#{model}:generateContent?key=#{api_key}"
-
-    # Note: Gemini API doesn't have a dedicated system prompt field like some others.
-    # We prepend it to the user prompt.
-    # system_instruction = "You are a code reviewer. Please respond *only* with valid JSON."
-    # full_prompt = system_instruction <> "\n\n" <> prompt
-    # The prompt already includes detailed instructions, including the JSON output format.
 
     request_body = %{
       "contents" => [
         %{
           "role" => "user",
-          # Use the prompt directly
           "parts" => [%{"text" => prompt}]
         }
       ],
       "generationConfig" => %{
-        # Lower temperature for more deterministic output
         "temperature" => 0.2,
-        # Request JSON output format
         "response_mime_type" => "application/json"
       }
     }
@@ -321,13 +278,9 @@ defmodule AICodeReview do
           {"Content-Type", "application/json"}
         ],
         json: request_body,
-        # 6 minutes timeout
         receive_timeout: 360_000
       )
 
-    # IO.inspect(response, label: "Full Gemini Response") # Debug full response
-
-    # --- Safely extract text ---
     text_content =
       response.body
       |> Map.get("candidates")
@@ -341,7 +294,6 @@ defmodule AICodeReview do
       end
 
     if text_content do
-      # Clean potential markdown fences if Gemini wraps the JSON
       cleaned_text =
         text_content
         |> String.trim()
@@ -350,10 +302,8 @@ defmodule AICodeReview do
         |> String.trim_trailing("```")
         |> String.trim()
 
-      # Return the cleaned text for JSON parsing
       cleaned_text
     else
-      # Handle cases where the expected structure isn't present
       finish_reason =
         response.body |> Map.get("candidates") |> List.first() |> Map.get("finishReason")
 
@@ -369,14 +319,10 @@ defmodule AICodeReview do
     end
   end
 
-  # --- GitHub Comment Posting ---
-
   defp build_suggestion_body(message, suggestion, rule_file) do
     repo_url_base = "https://github.com/#{@repo}"
-    # Ensure rule file path is relative for the link
-    # Adjust base path if rules are elsewhere
     rule_link_path = Path.join([@rules_dir, rule_file])
-    # Link to rule in commit
+
     rule_link =
       "[View Rule](#{repo_url_base}/blob/#{@head_sha}/#{@rules_dir}/#{rule_file})"
 
@@ -397,5 +343,4 @@ defmodule AICodeReview do
   end
 end
 
-# Run the script
 AICodeReview.run()
