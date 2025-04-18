@@ -1,0 +1,62 @@
+name: Test coverage check
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  ai_review:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Check if commit is co-authored by github-actions[bot]
+        id: check_bot
+        run: |
+          git fetch origin ${{ github.event.pull_request.head.ref }} --depth=1
+          LAST_COMMIT=$(git log origin/${{ github.event.pull_request.head.ref }} -1 --pretty="%B")
+          echo "Last commit message: $LAST_COMMIT"
+          if echo "$LAST_COMMIT" | grep -iq "Co-authored-by: github-actions\[bot\]"; then
+            echo "github-actions[bot] detected"
+            echo "skip=true" >> $GITHUB_OUTPUT
+          else
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Print PR context
+        if: steps.check_bot.outputs.skip != 'true'
+        run: |
+          echo "Ref Name (github.ref_name): ${{ github.ref_name }}"
+          echo "Head Ref (github.head_ref): ${{ github.head_ref }}"
+          echo "Base Ref (github.base_ref): ${{ github.base_ref }}"
+          echo "PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}"
+          echo "Repository: ${{ github.repository }}"
+
+      - name: Set up Elixir
+        if: steps.check_bot.outputs.skip != 'true'
+        uses: erlef/setup-beam@v1
+        with:
+          elixir-version: '1.17'
+          otp-version: '26.1'
+
+      - name: Run AI Code Review
+        if: steps.check_bot.outputs.skip != 'true'
+        run: |
+          mkdir temp_runner
+          cp scripts/*.{exs,ex} temp_runner/
+          cp -r .ai-code-rules temp_runner/
+          cd temp_runner
+          elixir suggest_missing_tests.exs
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
