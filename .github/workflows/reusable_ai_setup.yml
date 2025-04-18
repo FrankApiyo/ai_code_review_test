@@ -1,0 +1,73 @@
+---
+name: Reusable AI Setup and Execution
+
+on:
+  workflow_call:
+    inputs:
+      script_to_run:
+        description: 'The Elixir script to execute in the temp_runner directory'
+        required: true
+        type: string
+      run_coverage_commands:
+        description: 'Whether to run mix deps.get and mix coveralls.json'
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      GEMINI_API_KEY:
+        required: false
+      OPENAI_API_KEY:
+        required: false
+
+jobs:
+  setup_and_run:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Print PR context (Optional, can be done in caller)
+        run: |
+          echo "Reusable: Ref Name (github.ref_name): ${{ github.ref_name }}"
+          echo "Reusable: Head Ref (github.head_ref): ${{ github.head_ref }}"
+          echo "Reusable: Base Ref (github.base_ref): ${{ github.base_ref }}"
+          echo "Reusable: PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}"
+          echo "Reusable: Repository: ${{ github.repository }}"
+
+      - name: Set up Elixir
+        uses: erlef/setup-beam@v1
+        with:
+          elixir-version: '1.17'
+          otp-version: '26.1'
+
+      - name: Run Setup Commands (Optional)
+        if: ${{ inputs.run_coverage_commands == true }}
+        run: |
+          echo "Running setup commands (deps, coverage)..."
+          mix deps.get
+          MIX_ENV=test mix coveralls.json
+
+      - name: Prepare and Run Script
+        run: |
+          echo "Setting up temporary runner directory..."
+          mkdir temp_runner
+          cp scripts/*.{exs,ex} temp_runner/
+          cp -r .ai-code-rules temp_runner/
+          if ${{ inputs.run_coverage_commands == true }} && [ -d "cover" ]; then
+            echo "Moving coverage data..."
+            mv cover temp_runner/
+          elif ${{ inputs.run_coverage_commands == true }}; then
+             echo "Warning: Coverage directory 'cover' not found after mix coveralls.json"
+          fi
+          cd temp_runner
+          echo "Executing script: ${{ inputs.script_to_run }}"
+          elixir ${{ inputs.script_to_run }}
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }} # Context from caller
