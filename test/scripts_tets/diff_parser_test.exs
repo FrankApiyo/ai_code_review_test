@@ -186,4 +186,32 @@ defmodule DiffParserTest do
 
     assert DiffParser.parse(diff_text) == expected
   end
+
+  test "parses diff with spaces in the filename" do
+    diff_text = """
+    diff --git a/my file with spaces.txt b/my file with spaces.txt
+    index 0000000..1111111 100644
+    --- a/my file with spaces.txt
+    +++ b/my file with spaces.txt
+    @@ -0,0 +1,3 @@
+    +First line in spaced file.
+    +
+    +Third line after a blank one.
+    diff --git a/another/path with space/file.ex b/another/path with space/file.ex
+    index 2222222..3333333 100644
+    --- a/another/path with space/file.ex
+    +++ b/another/path with space/file.ex
+    @@ -5,0 +6,1 @@
+    +def new_func(), do: :ok
+    """
+
+    expected = [
+      %{file: "my file with spaces.txt", line: 1, code: "First line in spaced file."},
+      %{file: "my file with spaces.txt", line: 2, code: ""},
+      %{file: "my file with spaces.txt", line: 3, code: "Third line after a blank one."},
+      %{file: "another/path with space/file.ex", line: 6, code: "def new_func(), do: :ok"}
+    ]
+
+    assert DiffParser.parse(diff_text) == expected
+  end
 end
