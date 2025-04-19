@@ -6,6 +6,8 @@ Mix.install([
 Code.require_file("diff_parser.ex", __DIR__)
 Code.require_file("git_utils.ex", __DIR__)
 Code.require_file("github_comment.ex", __DIR__)
+Code.require_file("ai_code_review_utils.ex", __DIR__)
+Code.require_file("suggest_missing_tests_utils.ex", __DIR__)
 
 defmodule SuggestMissingTests do
   @coverage_file "cover/excoveralls.json"
@@ -42,10 +44,11 @@ defmodule SuggestMissingTests do
 
     coverage_data = read_coverage_file(@coverage_file)
     IO.puts("Successfully read and parsed #{@coverage_file}.")
-    coverage_map = build_coverage_map(coverage_data)
+    coverage_map = SuggestMissingTestsUtils.build_coverage_map(coverage_data)
     IO.puts("Built coverage map for #{map_size(coverage_map)} files.")
 
-    added_and_uncovered_lines = filter_added_uncovered(added_lines, coverage_map)
+    added_and_uncovered_lines =
+      SuggestMissingTestsUtils.filter_added_uncovered(added_lines, coverage_map)
 
     IO.puts(
       "Filtered lines: Found #{Enum.count(added_and_uncovered_lines)} added lines that are also uncovered."
@@ -56,7 +59,7 @@ defmodule SuggestMissingTests do
       System.halt(0)
     end
 
-    chunks = chunk_lines(added_and_uncovered_lines, 15_000)
+    chunks = AiCodeReviewUtils.chunk_lines(added_and_uncovered_lines, 15_000)
     IO.puts("Split added & uncovered lines into #{Enum.count(chunks)} chunks for AI suggestion.")
 
     all_suggestions = process_chunks(chunks)
@@ -95,61 +98,6 @@ defmodule SuggestMissingTests do
       {:error, reason} ->
         raise "Failed to read coverage file #{path}: #{reason}"
     end
-  end
-
-  @doc """
-  Builds a map from the coverage data list for efficient lookups.
-  Map structure: FilePath => %{coverage: [...], source_lines: [...]}
-  """
-  defp build_coverage_map(coverage_data) when is_list(coverage_data) do
-    Enum.reduce(coverage_data, %{}, fn file_coverage, acc ->
-      file_name = Map.get(file_coverage, "name")
-      coverage = Map.get(file_coverage, "coverage")
-      source_lines = Map.get(file_coverage, "source")
-      source_lines_list = String.split(source_lines, "\n")
-
-      if is_binary(file_name) && is_list(coverage) && is_list(source_lines_list) &&
-           length(coverage) == length(source_lines_list) do
-        Map.put(acc, file_name, %{
-          coverage: coverage,
-          source_lines: source_lines_list
-        })
-      else
-        IO.puts(
-          :stderr,
-          "Warning: Skipping invalid or incomplete coverage entry for file: #{file_name || "Unknown"}"
-        )
-
-        acc
-      end
-    end)
-  end
-
-  @doc """
-  Filters the list of added lines to keep only those with coverage == 0.
-  """
-  defp filter_added_uncovered(added_lines, coverage_map) do
-    Enum.filter(added_lines, fn %{file: file_path, line: line_num} ->
-      case Map.get(coverage_map, file_path) do
-        nil ->
-          false
-
-        %{coverage: coverage_list} ->
-          coverage_index = line_num - 1
-
-          if coverage_index >= 0 and coverage_index < length(coverage_list) do
-            coverage_value = Enum.at(coverage_list, coverage_index)
-            coverage_value == 0
-          else
-            IO.puts(
-              :stderr,
-              "Warning: Line number #{line_num} for file '#{file_path}' is out of bounds for coverage data (length #{length(coverage_list)}). Skipping check for this line."
-            )
-
-            false
-          end
-      end
-    end)
   end
 
   @doc """
@@ -270,34 +218,6 @@ defmodule SuggestMissingTests do
     #{test_suggestion}
     ```
     """
-  end
-
-  # --- AI Interaction ---
-
-  @doc """
-  Splits the list of lines into chunks based on estimated character count.
-  """
-  defp chunk_lines(lines_data, max_chars \\ 15_000) do
-    unless is_list(lines_data) and is_integer(max_chars) and max_chars > 0 do
-      raise ArgumentError, "Invalid arguments for chunk_lines/2"
-    end
-
-    Enum.reduce(lines_data, {[], [], 0}, fn %{file: file, line: line, code: code} = line_data,
-                                            {chunks, current_chunk, char_count} ->
-      line_size = String.length(file) + String.length(to_string(line)) + String.length(code) + 80
-
-      if char_count + line_size > max_chars and char_count > 0 do
-        {[Enum.reverse(current_chunk) | chunks], [line_data], line_size}
-      else
-        {chunks, [line_data | current_chunk], char_count + line_size}
-      end
-    end)
-    |> then(fn {chunks, last_chunk, _} ->
-      final_chunks =
-        if Enum.empty?(last_chunk), do: chunks, else: [Enum.reverse(last_chunk) | chunks]
-
-      Enum.reverse(final_chunks)
-    end)
   end
 
   @doc """
