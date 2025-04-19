@@ -7,6 +7,7 @@ Mix.install([
 Code.require_file("diff_parser.ex", __DIR__)
 Code.require_file("git_utils.ex", __DIR__)
 Code.require_file("github_comment.ex", __DIR__)
+Code.require_file("ai_code_review_utils.ex", __DIR__)
 
 defmodule AICodeReview do
   @repo System.fetch_env!("GITHUB_REPOSITORY")
@@ -39,7 +40,7 @@ defmodule AICodeReview do
       "Parsed diff, found #{Enum.count(added_lines_with_context)} added lines with context."
     )
 
-    chunks = chunk_lines(added_lines_with_context)
+    chunks = AiCodeReviewUtils.chunk_lines(added_lines_with_context)
     IO.puts("Split added lines into #{Enum.count(chunks)} chunks for AI review.")
 
     all_violations =
@@ -188,25 +189,6 @@ defmodule AICodeReview do
     end
   end
 
-  defp chunk_lines(lines_with_context, max_chars \\ 12_000) do
-    Enum.reduce(lines_with_context, {[], [], 0}, fn %{code: code} = line_data,
-                                                    {chunks, current_chunk, char_count} ->
-      line_size = String.length(code) + 50
-
-      if char_count + line_size > max_chars and char_count > 0 do
-        {[Enum.reverse(current_chunk) | chunks], [line_data], line_size}
-      else
-        {chunks, [line_data | current_chunk], char_count + line_size}
-      end
-    end)
-    |> then(fn {chunks, last_chunk, _} ->
-      final_chunks =
-        if Enum.empty?(last_chunk), do: chunks, else: [Enum.reverse(last_chunk) | chunks]
-
-      Enum.reverse(final_chunks)
-    end)
-  end
-
   defp build_prompt(chunk, rules) do
     rules_text =
       rules
@@ -326,7 +308,6 @@ defmodule AICodeReview do
           {"Content-Type", "application/json"}
         ],
         json: request_body,
-        # 6 minutes
         receive_timeout: 360_000
       )
 
