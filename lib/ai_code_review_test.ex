@@ -22,4 +22,8 @@ defmodule AiCodeReviewTest do
   def not_tested_function do
     :hello
   end
+
+  def add_numbers(a, b) do
+    a + b
+  end
 end
