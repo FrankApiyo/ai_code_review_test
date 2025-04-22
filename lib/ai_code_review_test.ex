@@ -18,4 +18,8 @@ defmodule AiCodeReviewTest do
       :world -> :world
     end
   end
+
+  def not_tested_function do
+    :hello
+  end
 end
