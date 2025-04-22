@@ -14,5 +14,8 @@ defmodule AiCodeReviewTest do
   """
   def hello do
     :world
+    |> case do
+      :world -> :world
+    end
   end
 end
